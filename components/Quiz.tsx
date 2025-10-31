@@ -13,6 +13,7 @@ type Question = {
   prompt: string;
   options: QuestionOption[];
   correctKey?: string;
+  explanation?: string;
 };
 
 type ApiResponse = {
@@ -27,6 +28,7 @@ export default function Quiz() {
   const [error, setError] = useState<string | null>(null);
   const [answered, setAnswered] = useState<Record<number, boolean>>({});
   const [showResults, setShowResults] = useState(false);
+  const [source, setSource] = useState<"glosor" | "course">("glosor");
 
   // Shuffle helper
   const shuffleInPlace = <T,>(arr: T[]): T[] => {
@@ -37,11 +39,12 @@ export default function Quiz() {
     return arr;
   };
 
-  // Fetch questions
+  // Fetch questions (depends on source)
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await fetch("/api/questions", { cache: "no-store" });
+        setLoading(true);
+        const res = await fetch(`/api/questions?source=${source}`, { cache: "no-store" });
         if (!res.ok) throw new Error("Nätverksfel");
         const data: ApiResponse = await res.json();
         // Deep copy, then shuffle questions and options
@@ -50,7 +53,8 @@ export default function Quiz() {
           title: q.title,
           prompt: q.prompt,
           options: q.options.map((o) => ({ key: o.key, text: o.text })),
-          correctKey: q.correctKey
+          correctKey: q.correctKey,
+          explanation: (q as any).explanation
         }));
         // Shuffle alternatives per question
         cloned.forEach((q) => {
@@ -70,7 +74,7 @@ export default function Quiz() {
       }
     };
     fetchData();
-  }, []);
+  }, [source]);
 
   // Persist to localStorage (optional; still store within a session)
   useEffect(() => {
@@ -132,8 +136,15 @@ export default function Quiz() {
       <div className="progress">
         <div className="bar" style={{ width: `${progress}%` }} />
       </div>
-      <div className="meta">
-        <span>
+      <div className="meta" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <label>
+          Datakälla:
+          <select value={source} onChange={(e) => setSource(e.target.value as any)} style={{ marginLeft: 8 }}>
+            <option value="glosor">Glosor (1.md + 2.md)</option>
+            <option value="course">Kursformat (SAK1_Questions_with_Answers.md)</option>
+          </select>
+        </label>
+        <span style={{ marginLeft: "auto" }}>
           Fråga {currentIdx + 1} av {total}
         </span>
       </div>
@@ -169,6 +180,9 @@ export default function Quiz() {
             );
           })}
         </form>
+        {answered[current.number] && current.explanation ? (
+          <p className="muted" style={{ marginTop: 8 }}>Motivering: {current.explanation}</p>
+        ) : null}
       </article>
 
       <div className="nav">
