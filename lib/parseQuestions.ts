@@ -11,87 +11,72 @@ export type Question = {
   title: string; // e.g., "Fråga 1"
   prompt: string; // question text
   options: QuestionOption[];
+  correctKey?: string; // optional: a/b/c/d if available
 };
 
 const ANSWER_LETTERS = ["a", "b", "c", "d"] as const;
 
+// Load from new Glosor-style sources: 1.md and 2.md
 export function loadQuestionsFromMarkdown(): Question[] {
-  const mdPath = path.join(process.cwd(), "SAK1_All_Unique_Questions.md");
-  const file = fs.readFileSync(mdPath, "utf-8");
-  return parseMarkdown(file);
+  const root = process.cwd();
+  const paths = [path.join(root, "1.md"), path.join(root, "2.md")];
+  const contents = paths
+    .filter((p) => fs.existsSync(p))
+    .map((p) => fs.readFileSync(p, "utf-8"));
+  if (contents.length === 0) return [];
+  const allLines = contents.flatMap((c) => c.split(/\r?\n/));
+  return parseGlosorLines(allLines);
 }
 
-export function parseMarkdown(markdown: string): Question[] {
-  const lines = markdown.split(/\r?\n/);
+// Lines look like:
+// (Frågan? A: alt1, B: alt2, C: alt3, D: alt4) # D
+export function parseGlosorLines(lines: string[]): Question[] {
   const questions: Question[] = [];
-
-  let current: Partial<Question> | null = null;
-  let collectingOptions = false;
-
-  const pushCurrentIfComplete = () => {
-    if (!current) return;
-    if (
-      typeof current.number === "number" &&
-      current.title &&
-      current.prompt &&
-      current.options &&
-      current.options.length > 0
-    ) {
-      questions.push(current as Question);
-    }
-    current = null;
-    collectingOptions = false;
-  };
+  let counter = 0;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
+    if (!line.startsWith("(") || !line.includes("#")) continue;
 
-    // Start of a question block: lines like "## Fråga 1"
-    const qMatch = /^##\s*Fråga\s*(\d+)/i.exec(line);
-    if (qMatch) {
-      pushCurrentIfComplete();
-      const number = Number(qMatch[1]);
-      current = {
-        number,
-        title: `Fråga ${number}`,
-        prompt: "",
-        options: []
-      };
-      collectingOptions = false;
-      continue;
-    }
+    // Extract the trailing answer after '#'
+    const answerMatch = /#\s*([A-Da-d])\s*$/.exec(line.replace(/\\#/g, "#"));
+    if (!answerMatch) continue;
+    const correctKey = answerMatch[1].toLowerCase();
 
-    if (!current) continue;
+    // Extract inside parentheses
+    const insideMatch = /^\((.*)\)\s*#/.exec(line.replace(/\\#/g, "#"));
+    if (!insideMatch) continue;
+    const inside = insideMatch[1];
 
-    // First non-empty, non-header line after header is the prompt
-    if (!current.prompt && line && !line.startsWith("- ")) {
-      current.prompt = line.replace(/^\*\*OBS:\*\*.*/i, "");
-      continue;
-    }
+    // Split question from options: question part before ' A:'
+    const aIndex = inside.indexOf(" A:");
+    if (aIndex === -1) continue;
+    const prompt = inside.slice(0, aIndex).trim().replace(/^\(+|\)+$/g, "");
+    const optionsPart = inside.slice(aIndex).trim();
 
-    // Option lines: "- a) ..."
-    const optMatch = /^-\s*([a-dA-D])\)\s*(.+)$/.exec(line);
-    if (optMatch) {
-      collectingOptions = true;
-      const key = optMatch[1].toLowerCase();
-      const text = optMatch[2].trim();
-      if (
-        current.options &&
-        ANSWER_LETTERS.includes(key as (typeof ANSWER_LETTERS)[number])
-      ) {
-        current.options.push({ key, text });
+    // Parse options e.g. A: text, B: text, C: text, D: text
+    const optRegex = /([A-Da-d])\s*:\s*([^,]+)(?:,|$)/g;
+    const found: QuestionOption[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = optRegex.exec(optionsPart))) {
+      const k = m[1].toLowerCase();
+      const text = m[2].trim();
+      if (ANSWER_LETTERS.includes(k as (typeof ANSWER_LETTERS)[number])) {
+        found.push({ key: k, text });
       }
-      continue;
     }
 
-    // If we've started options and hit a non-option, the question likely ended
-    if (collectingOptions && line && !line.startsWith("- ")) {
-      pushCurrentIfComplete();
+    if (found.length >= 2) {
+      counter += 1;
+      questions.push({
+        number: counter,
+        title: `Fråga ${counter}`,
+        prompt,
+        options: found,
+        correctKey
+      });
     }
   }
-
-  // Push trailing question
-  if (current) pushCurrentIfComplete();
 
   return questions;
 }

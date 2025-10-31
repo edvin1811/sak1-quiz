@@ -1,6 +1,6 @@
 # SAK1 Quiz (Next.js)
 
-This Next.js app parses `SAK1_All_Unique_Questions.md` and shows a quiz where you can select one alternative per question.
+This Next.js app parses `1.md` and `2.md` (100 questions total) and shows a quiz where you can select one alternative per question. It also knows the correct answer from each line (format: `(Question A: a, B: b, C: c, D: d) # X`).
 
 ## Requirements
 - Node 18+
@@ -20,8 +20,8 @@ Open `http://localhost:3000`.
 - `lib/parseQuestions.ts` – Simple parser for the markdown format
 - `styles/globals.css` – Styling
 
-## Data file
-Keep `SAK1_All_Unique_Questions.md` in the project root (same level as `package.json`).
+## Data files
+Keep `1.md` and `2.md` in the project root (same level as `package.json`).
 
 ## Notes
 - No correct answers are shown; this is for practice.

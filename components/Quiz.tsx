@@ -12,6 +12,7 @@ type Question = {
   title: string;
   prompt: string;
   options: QuestionOption[];
+  correctKey?: string;
 };
 
 type ApiResponse = {
@@ -24,6 +25,8 @@ export default function Quiz() {
   const [answers, setAnswers] = useState<Record<number, string>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [answered, setAnswered] = useState<Record<number, boolean>>({});
+  const [showResults, setShowResults] = useState(false);
 
   // Load from localStorage
   useEffect(() => {
@@ -65,7 +68,10 @@ export default function Quiz() {
   }, [currentIdx, total]);
 
   const selectAnswer = (qNum: number, key: string) => {
+    // If already answered, do nothing (locked after selection)
+    if (answered[qNum]) return;
     setAnswers((prev) => ({ ...prev, [qNum]: key }));
+    setAnswered((prev) => ({ ...prev, [qNum]: true }));
   };
 
   const goPrev = () => setCurrentIdx((i) => Math.max(0, i - 1));
@@ -74,6 +80,35 @@ export default function Quiz() {
   if (loading) return <p>Laddar…</p>;
   if (error) return <p className="error">{error}</p>;
   if (total === 0) return <p>Inga frågor hittades.</p>;
+
+  if (showResults) {
+    const numCorrect = questions.reduce((acc, q) => acc + (answers[q.number] === q.correctKey ? 1 : 0), 0);
+    const numWrong = total - numCorrect;
+    return (
+      <div className="quiz">
+        <h2>Resultat</h2>
+        <p className="prompt">Rätt: {numCorrect} · Fel: {numWrong} · Totalt: {total}</p>
+        <section className="card">
+          <ul>
+            {questions.map((q) => {
+              const picked = answers[q.number];
+              const correct = q.correctKey;
+              const isCorrect = picked && correct && picked === correct;
+              return (
+                <li key={q.number} style={{ marginBottom: 8 }}>
+                  <strong>{q.title}</strong> — {isCorrect ? "Rätt" : "Fel"}
+                  <div style={{ marginTop: 4 }}>
+                    Ditt svar: {picked ?? "(ej valt)"} {(!isCorrect && picked) ? "✗" : ""}
+                  </div>
+                  <div>Rätt svar: {correct ?? "(saknas)"} ✓</div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      </div>
+    );
+  }
 
   return (
     <div className="quiz">
@@ -93,8 +128,15 @@ export default function Quiz() {
           {current.options.map((opt) => {
             const id = `q${current.number}-${opt.key}`;
             const checked = answers[current.number] === opt.key;
+            const isCorrect = current.correctKey && current.correctKey === opt.key;
+            const isAnswered = !!answered[current.number];
+            const isWrongSelected = isAnswered && checked && !isCorrect;
             return (
-              <label key={opt.key} htmlFor={id} className={`option ${checked ? "checked" : ""}`}>
+              <label
+                key={opt.key}
+                htmlFor={id}
+                className={`option ${checked ? "checked" : ""} ${isAnswered && isCorrect ? "correct" : ""} ${isWrongSelected ? "wrong" : ""}`}
+              >
                 <input
                   id={id}
                   type="radio"
@@ -102,6 +144,7 @@ export default function Quiz() {
                   value={opt.key}
                   checked={checked}
                   onChange={() => selectAnswer(current.number, opt.key)}
+                  disabled={isAnswered}
                 />
                 <span className="optkey">{opt.key})</span>
                 <span className="opttext">{opt.text}</span>
@@ -115,9 +158,15 @@ export default function Quiz() {
         <button onClick={goPrev} disabled={currentIdx === 0}>
           Föregående
         </button>
-        <button onClick={goNext} disabled={currentIdx === total - 1}>
-          Nästa
-        </button>
+        {currentIdx < total - 1 ? (
+          <button onClick={goNext} disabled={!answered[current.number]}>
+            Nästa
+          </button>
+        ) : (
+          <button onClick={() => setShowResults(true)} disabled={!answered[current.number]}>
+            Slutför
+          </button>
+        )}
       </div>
 
       <section className="summary">

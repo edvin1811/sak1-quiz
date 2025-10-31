@@ -72,6 +72,8 @@ body {
 .option .optkey { color: var(--muted); width: 28px; text-transform: lowercase; }
 .option .opttext { color: var(--text); }
 .option.checked { border-color: var(--accent); background: #0b1712; }
+.option.correct { border-color: #22c55e; background: #0b1712; }
+.option.wrong { border-color: #ef4444; background: #1a0d0d; }
 
 .nav {
   display: flex;
@@ -95,4 +97,5 @@ body {
 .summary ul { margin: 8px 0 0 18px; }
 
 .error { color: var(--error); }
+.muted { color: var(--muted); }
 
