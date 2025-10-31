@@ -28,13 +28,14 @@ export default function Quiz() {
   const [answered, setAnswered] = useState<Record<number, boolean>>({});
   const [showResults, setShowResults] = useState(false);
 
-  // Load from localStorage
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("sak1-answers");
-      if (raw) setAnswers(JSON.parse(raw));
-    } catch {}
-  }, []);
+  // Shuffle helper
+  const shuffleInPlace = <T,>(arr: T[]): T[] => {
+    for (let i = arr.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  };
 
   // Fetch questions
   useEffect(() => {
@@ -43,7 +44,25 @@ export default function Quiz() {
         const res = await fetch("/api/questions", { cache: "no-store" });
         if (!res.ok) throw new Error("Nätverksfel");
         const data: ApiResponse = await res.json();
-        setQuestions(data.questions);
+        // Deep copy, then shuffle questions and options
+        const cloned: Question[] = data.questions.map((q) => ({
+          number: q.number,
+          title: q.title,
+          prompt: q.prompt,
+          options: q.options.map((o) => ({ key: o.key, text: o.text })),
+          correctKey: q.correctKey
+        }));
+        // Shuffle alternatives per question
+        cloned.forEach((q) => {
+          shuffleInPlace(q.options);
+        });
+        // Shuffle question order
+        shuffleInPlace(cloned);
+        // New quiz session: reset answers state and storage
+        setAnswers({});
+        setAnswered({});
+        try { localStorage.removeItem("sak1-answers"); } catch {}
+        setQuestions(cloned);
       } catch (e) {
         setError("Kunde inte ladda frågorna");
       } finally {
@@ -53,11 +72,9 @@ export default function Quiz() {
     fetchData();
   }, []);
 
-  // Persist to localStorage
+  // Persist to localStorage (optional; still store within a session)
   useEffect(() => {
-    try {
-      localStorage.setItem("sak1-answers", JSON.stringify(answers));
-    } catch {}
+    try { localStorage.setItem("sak1-answers", JSON.stringify(answers)); } catch {}
   }, [answers]);
 
   const total = questions.length;
