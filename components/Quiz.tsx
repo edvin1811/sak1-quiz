@@ -1,20 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-
-type QuestionOption = {
-  key: string;
-  text: string;
-};
-
-type Question = {
-  number: number;
-  title: string;
-  prompt: string;
-  options: QuestionOption[];
-  correctKey?: string;
-  explanation?: string;
-};
+import { useEffect, useMemo, useState, useRef } from "react";
+import { parseCourseMarkdown, type Question } from "@/lib/parseCourseMarkdown";
 
 type ApiResponse = {
   questions: Question[];
@@ -28,7 +15,8 @@ export default function Quiz() {
   const [error, setError] = useState<string | null>(null);
   const [answered, setAnswered] = useState<Record<number, boolean>>({});
   const [showResults, setShowResults] = useState(false);
-  const [source, setSource] = useState<"glosor" | "course">("glosor");
+  const [fileName, setFileName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Shuffle helper
   const shuffleInPlace = <T,>(arr: T[]): T[] => {
@@ -39,42 +27,94 @@ export default function Quiz() {
     return arr;
   };
 
-  // Fetch questions (depends on source)
-  useEffect(() => {
-    const fetchData = async () => {
+  // Load and process questions
+  const loadQuestions = (questionsToLoad: Question[]) => {
+    // Deep copy, then shuffle questions and options
+    const cloned: Question[] = questionsToLoad.map((q) => ({
+      number: q.number,
+      title: q.title,
+      prompt: q.prompt,
+      options: q.options.map((o) => ({ key: o.key, text: o.text })),
+      correctKey: q.correctKey,
+      explanation: q.explanation
+    }));
+    // Shuffle alternatives per question
+    cloned.forEach((q) => {
+      shuffleInPlace(q.options);
+    });
+    // Shuffle question order
+    shuffleInPlace(cloned);
+    // New quiz session: reset answers state and storage
+    setAnswers({});
+    setAnswered({});
+    setCurrentIdx(0);
+    setShowResults(false);
+    try { localStorage.removeItem("sak1-answers"); } catch {}
+    setQuestions(cloned);
+    setError(null);
+  };
+
+  // Don't try to load from API - user must import a file
+
+  // Handle file upload
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Check if it's a markdown file
+    if (!file.name.endsWith(".md")) {
+      setError("Vänligen välj en .md-fil");
+      return;
+    }
+
+    setFileName(file.name);
+    setLoading(true);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
       try {
-        setLoading(true);
-        const res = await fetch(`/api/questions?source=${source}`, { cache: "no-store" });
-        if (!res.ok) throw new Error("Nätverksfel");
-        const data: ApiResponse = await res.json();
-        // Deep copy, then shuffle questions and options
-        const cloned: Question[] = data.questions.map((q) => ({
-          number: q.number,
-          title: q.title,
-          prompt: q.prompt,
-          options: q.options.map((o) => ({ key: o.key, text: o.text })),
-          correctKey: q.correctKey,
-          explanation: (q as any).explanation
-        }));
-        // Shuffle alternatives per question
-        cloned.forEach((q) => {
-          shuffleInPlace(q.options);
-        });
-        // Shuffle question order
-        shuffleInPlace(cloned);
-        // New quiz session: reset answers state and storage
-        setAnswers({});
-        setAnswered({});
-        try { localStorage.removeItem("sak1-answers"); } catch {}
-        setQuestions(cloned);
-      } catch (e) {
-        setError("Kunde inte ladda frågorna");
-      } finally {
+        const content = e.target?.result as string;
+        const parsed = parseCourseMarkdown(content);
+        
+        if (parsed.length === 0) {
+          setError("Inga frågor hittades i filen. Kontrollera att filen har rätt format.");
+          setLoading(false);
+          return;
+        }
+
+        loadQuestions(parsed);
+        setLoading(false);
+      } catch (err) {
+        setError("Kunde inte läsa filen. Kontrollera formatet.");
         setLoading(false);
       }
     };
-    fetchData();
-  }, [source]);
+    reader.onerror = () => {
+      setError("Kunde inte läsa filen");
+      setLoading(false);
+    };
+    reader.readAsText(file);
+  };
+
+  // Clear imported file
+  const clearFile = () => {
+    setFileName(null);
+    setQuestions([]);
+    setAnswers({});
+    setAnswered({});
+    setCurrentIdx(0);
+    setShowResults(false);
+    setError(null);
+    try { localStorage.removeItem("sak1-answers"); } catch {}
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // Set initial loading to false since we're not loading anything on mount
+  useEffect(() => {
+    setLoading(false);
+  }, []);
 
   // Persist to localStorage (optional; still store within a session)
   useEffect(() => {
@@ -98,9 +138,97 @@ export default function Quiz() {
   const goPrev = () => setCurrentIdx((i) => Math.max(0, i - 1));
   const goNext = () => setCurrentIdx((i) => Math.min(total - 1, i + 1));
 
-  if (loading) return <p>Laddar…</p>;
-  if (error) return <p className="error">{error}</p>;
-  if (total === 0) return <p>Inga frågor hittades.</p>;
+  // Show loading state
+  if (loading) {
+    return (
+      <div className="quiz" style={{ textAlign: "center", padding: "2rem" }}>
+        <p>Laddar…</p>
+      </div>
+    );
+  }
+
+  // Show error state
+  if (error) {
+    return (
+      <div className="quiz" style={{ textAlign: "center", padding: "2rem" }}>
+        <p className="error" style={{ marginBottom: "1rem" }}>{error}</p>
+        <button
+          type="button"
+          onClick={() => {
+            setError(null);
+            if (fileInputRef.current) {
+              fileInputRef.current.value = "";
+            }
+          }}
+          style={{
+            padding: "8px 16px",
+            cursor: "pointer",
+            border: "1px solid #ccc",
+            borderRadius: "4px",
+            background: "white"
+          }}
+        >
+          Stäng
+        </button>
+      </div>
+    );
+  }
+
+  // Show import screen if no file loaded
+  if (total === 0 || !fileName) {
+    return (
+      <div className="quiz" style={{ textAlign: "center", padding: "3rem 1rem", maxWidth: "600px", margin: "0 auto" }}>
+        <h1 style={{ marginBottom: "1rem" }}>Quiz-applikation</h1>
+        <p style={{ marginBottom: "2rem", fontSize: "1.1em", color: "#666" }}>
+          Välj en markdown-fil med quiz-frågor för att komma igång.
+        </p>
+        <label style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", gap: "1rem", cursor: "pointer" }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".md"
+            onChange={handleFileUpload}
+            style={{ display: "none" }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              padding: "12px 24px",
+              cursor: "pointer",
+              border: "2px solid #0070f3",
+              borderRadius: "8px",
+              background: "#0070f3",
+              color: "white",
+              fontSize: "1em",
+              fontWeight: "500"
+            }}
+          >
+            Välj quiz-fil (.md)
+          </button>
+        </label>
+        <div style={{ marginTop: "2rem", padding: "1rem", background: "#f5f5f5", borderRadius: "8px", textAlign: "left" }}>
+          <p style={{ marginTop: 0, fontWeight: "bold" }}>Förväntat filformat:</p>
+          <pre style={{ 
+            background: "white", 
+            padding: "1rem", 
+            borderRadius: "4px", 
+            overflow: "auto",
+            fontSize: "0.9em",
+            marginBottom: 0
+          }}>
+{`## Fråga 1
+Vad kan man analysera med en riskanalys?
+- a) Informationssäkerhetsrisker gällande IT-system
+- b) Informationssäkerhetsrisker gällande Människor
+- **d) Samtliga ovanstående** ✓
+
+*Motivering: En riskanalys kan omfatta alla aspekter...*`}
+          </pre>
+        </div>
+      </div>
+    );
+  }
 
   if (showResults) {
     const numCorrect = questions.reduce((acc, q) => acc + (answers[q.number] === q.correctKey ? 1 : 0), 0);
@@ -137,13 +265,52 @@ export default function Quiz() {
         <div className="bar" style={{ width: `${progress}%` }} />
       </div>
       <div className="meta" style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <label>
-          Datakälla:
-          <select value={source} onChange={(e) => setSource(e.target.value as any)} style={{ marginLeft: 8 }}>
-            <option value="glosor">Glosor (1.md + 2.md)</option>
-            <option value="course">Kursformat (SAK1_Questions_with_Answers.md)</option>
-          </select>
-        </label>
+        <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+            <span>Importera quiz-fil:</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".md"
+              onChange={handleFileUpload}
+              style={{ display: "none" }}
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                padding: "4px 12px",
+                cursor: "pointer",
+                border: "1px solid #ccc",
+                borderRadius: "4px",
+                background: "white"
+              }}
+            >
+              Välj fil
+            </button>
+          </label>
+          {fileName && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ fontSize: "0.9em", color: "#666" }}>
+                {fileName}
+              </span>
+              <button
+                type="button"
+                onClick={clearFile}
+                style={{
+                  padding: "4px 12px",
+                  cursor: "pointer",
+                  border: "1px solid #ccc",
+                  borderRadius: "4px",
+                  background: "white",
+                  fontSize: "0.9em"
+                }}
+              >
+                Rensa
+              </button>
+            </div>
+          )}
+        </div>
         <span style={{ marginLeft: "auto" }}>
           Fråga {currentIdx + 1} av {total}
         </span>
